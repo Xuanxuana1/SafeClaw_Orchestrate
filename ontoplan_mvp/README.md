@@ -34,3 +34,115 @@ pytest ontoplan_mvp/tests/ -v
 # Demo
 python -m ontoplan_mvp.demo
 ```
+
+---
+
+## TheAgentCompany Evaluation
+
+OntoPlan replaces the original single-agent runner with a DAG-based multi-node executor.
+The entry point is `evaluation/run_eval_orchestrated.py`.
+
+### Prerequisites
+
+- Python >= 3.12 (conda env `TAC` recommended)
+- `openhands-ai==0.42.0` installed (`pip install openhands-ai==0.42.0`)
+- Docker with `buildx` support
+- `config.toml` at the project root (see below)
+
+### config.toml
+
+Create `config.toml` at the project root (already gitignored):
+
+```toml
+[core]
+workspace_base = "/tmp/openhands_workspace"
+
+[llm.llm]
+model = "deepseek-ai/DeepSeek-V3.2"
+api_key = "YOUR_API_KEY"
+base_url = "http://YOUR_ENDPOINT/v1/"
+```
+
+`--agent-llm-config llm` maps to the `[llm.llm]` section.
+You can define multiple sections (e.g. `[llm.strong]`, `[llm.fast]`) and reference them by name.
+
+### Image naming convention
+
+Task images follow the pattern: `ghcr.io/theagentcompany/{task_name}-image:1.0.0`
+
+Note the `-image` suffix — e.g. `sde-add-all-repos-to-docs-image`, not `sde-add-all-repos-to-docs`.
+
+### macOS (Docker Desktop)
+
+```bash
+# 1. Install Docker Desktop from https://www.docker.com/products/docker-desktop/
+#    and start it (whale icon in menu bar)
+
+# 2. Log in to ghcr.io (GitHub token with read:packages scope)
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+# 3. Pull the task image
+docker pull ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0
+
+# 4. Run evaluation (from project root)
+conda activate TAC
+PYTHONPATH=$PWD python evaluation/run_eval_orchestrated.py \
+  --task-image-name ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0 \
+  --agent-llm-config llm \
+  --env-llm-config llm \
+  --outputs-path ./outputs/orchestrated
+```
+
+### Linux Server (SSH, no UI)
+
+Docker on Linux runs as a daemon — no desktop required.
+
+```bash
+# 1. Install Docker Engine (no Desktop needed)
+curl -fsSL https://get.docker.com | sudo sh
+
+# 2. Add your user to the docker group (avoid sudo for every command)
+sudo usermod -aG docker $USER
+newgrp docker          # apply without re-login
+
+# 3. Verify Docker is running
+docker info | head -5
+
+# 4. Log in to ghcr.io
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+
+# 5. Pull the task image
+docker pull ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0
+
+# 6. Install dependencies
+pip install openhands-ai==0.42.0
+
+# 7. Run evaluation in a persistent session (tmux recommended for long runs)
+tmux new -s eval
+cd /path/to/TheAgentCompany
+PYTHONPATH=$PWD python evaluation/run_eval_orchestrated.py \
+  --task-image-name ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0 \
+  --agent-llm-config llm \
+  --env-llm-config llm \
+  --outputs-path ./outputs/orchestrated
+# Detach: Ctrl+B then D  |  Reattach: tmux attach -t eval
+```
+
+> **Root account**: If running as root (e.g. EC2), the `docker` group step is unnecessary.
+> OpenHands also recommends root for full filesystem access inside containers.
+
+### Fallback behavior
+
+If OntoPlan planning fails or produces ≤1 executable node, the orchestrator
+automatically falls back to the original single-agent runner (`run_solver`).
+No manual intervention needed.
+
+### Output files
+
+Results are saved under `--outputs-path`:
+
+| File | Description |
+|------|-------------|
+| `traj_{task_name}.json` | Merged execution trajectory (all nodes) |
+| `eval_{task_name}.json` | Evaluation score |
+| `screenshots/` | Browser screenshots per node (if enabled) |

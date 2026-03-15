@@ -2,6 +2,7 @@
 evaluation/screenshots*/
 evaluation/outputs*/
 evaluation/config.toml
+/config.toml
 *download*
 *owncloud_data*
 *owncloud_apps*
@@ -177,3 +178,7 @@ cython_debug/
 matterbridge/*
 redis*
 !matterbridge/matterbridge.toml
+
+.claude/
+.cursor/
+.trellis/

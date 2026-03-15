@@ -387,26 +387,20 @@ def _parse_json_response(text: str) -> Any:
 
 _INTENT_EXTRACTION_SYSTEM = """You are an intent extraction module for an enterprise workflow orchestration system.
 
-Given a natural language task query, extract a list of "intent atoms" — these are capability requirement signals, NOT sub-tasks.
+Given a natural language task query, extract a list of intent atoms — capability requirement signals representing what the system must be able to do, not a decomposition of task steps.
 
-Each intent atom has:
-- name: a snake_case identifier from the known intent catalog
-- execution_mode_hint: one of AUTOMATED, INTERACTIVE, APPROVAL
-- target_service_hints: list of services needed (e.g., GitLab, RocketChat, OwnCloud, Plane, Email)
-- role_hints: list of roles involved (e.g., SDE, PM, HR, Finance, DS, Admin)
-- input_artifacts: list of expected input artifact names
-- output_artifacts: list of expected output artifact names
-- target_actor_hint: if this is an interaction with a specific role (e.g., "Developer", "Manager"), null otherwise
+Each intent atom must have:
+- name: snake_case identifier from the known intent catalog; use a new descriptive snake_case name only if no catalog entry matches
+- execution_mode_hint: AUTOMATED if a machine performs the action; INTERACTIVE if a human actor must perform or receive the action; APPROVAL if a human must make an authorization decision
+- target_service_hints: list of required services
+- role_hints: list of organizational roles involved
+- input_artifacts: list of artifact names consumed by this intent
+- output_artifacts: list of artifact names produced by this intent
+- target_actor_hint: role of the human actor targeted by this intent; null for AUTOMATED intents
 
-IMPORTANT:
-- Extract capability SIGNALS, not task decomposition steps
-- "ask someone to do X" → INTERACTIVE intent (not AUTOMATED)
-- "notify someone" → INTERACTIVE intent
-- "approve / sign off" → APPROVAL intent
-- Map to the closest intent from the known catalog when possible
-- If a query implies iteration (e.g., "if issues, ask to fix, then re-review"), note that in the intents
+When a query implies that a step may be re-executed based on a condition, represent that capability once with iteration semantics rather than listing it as multiple separate intents.
 
-Return a JSON array of intent objects."""
+Return ONLY a JSON array of intent objects with keys: name, execution_mode_hint, target_service_hints, role_hints, input_artifacts, output_artifacts, target_actor_hint."""
 
 
 def _build_intent_extraction_prompt(
@@ -435,10 +429,7 @@ def _build_intent_extraction_prompt(
         f'Extract intent atoms from this query:\n\n"{query}"\n\n'
         f"Known intent catalog: [{catalog_str}]\n"
         f"Known node types: [{types_str}]"
-        f"{pattern_hint}\n\n"
-        "Return ONLY a JSON array of objects with keys: name, execution_mode_hint, "
-        "target_service_hints, role_hints, input_artifacts, output_artifacts, target_actor_hint.\n"
-        "Prefer intents from the known catalog. If no exact match, create a new descriptive snake_case name."
+        f"{pattern_hint}"
     )
 
     return [
@@ -505,14 +496,14 @@ def llm_extract_intents(
 
 _JUDGE_SYSTEM = """You are a workflow quality judge. Given a task query and a candidate workflow DAG, score how well the DAG accomplishes the task.
 
-Score on a 0.0 to 1.0 scale considering:
-- Does the workflow cover all aspects of the query?
-- Are the node types appropriate for each step?
-- Is the execution mode correct (automated vs interactive vs approval)?
-- Are artifact flows logical (outputs connect to needed inputs)?
-- Is the structure efficient (not overly complex)?
+Score on a 0.0 to 1.0 scale across these criteria:
+- Coverage: does the workflow address all requirements stated in the query?
+- Node appropriateness: is each node type suited to its role in the workflow?
+- Execution mode accuracy: does each node use the correct mode (AUTOMATED, INTERACTIVE, or APPROVAL)?
+- Artifact coherence: do edge artifact flows match the producing node's outputs and the consuming node's inputs?
+- Structural efficiency: does the graph avoid unnecessary nodes or redundant paths?
 
-Return ONLY a JSON object: {"score": 0.X, "reasoning": "brief explanation"}"""
+Return ONLY a JSON object with keys: score (float in [0.0, 1.0]) and reasoning (string)."""
 
 
 def _format_dag_for_judge(workflow: WorkflowGraph) -> str:
@@ -577,11 +568,9 @@ Rules:
 7. Use APPROVAL execution_mode for approval gates
 8. Use AUTOMATED for all other processing nodes
 
-Return ONLY a JSON object with:
-{
-  "nodes": [{"name": "...", "node_type": "...", "execution_mode": "...", "input_artifacts": [...], "output_artifacts": [...], "metadata": {}}],
-  "edges": [{"source": "...", "target": "...", "artifacts_passed": [...]}]
-}"""
+Return ONLY a JSON object with two top-level keys:
+- nodes: array of objects, each with string fields name and node_type; string field execution_mode (AUTOMATED|INTERACTIVE|APPROVAL|SYSTEM); string-array fields input_artifacts and output_artifacts; object field metadata
+- edges: array of objects, each with string fields source and target; string-array field artifacts_passed"""
 
 
 def _build_dag_gen_prompt(
@@ -611,7 +600,7 @@ System nodes (always include):
   - QuerySourceNode (mode=SYSTEM, in=[], out=[any artifacts the query provides])
   - ResultSinkNode (mode=SYSTEM, in=[final artifacts], out=[])
 
-Return ONLY the JSON object with "nodes" and "edges" arrays."""
+"""
 
     return [
         {"role": "system", "content": _DAG_GEN_SYSTEM},
@@ -677,17 +666,17 @@ def llm_generate_dag(
 
 _SEED_GEN_SYSTEM = """You are a seed query generator for an enterprise workflow orchestration system.
 
-Given a set of node types (agent capabilities), generate diverse natural language task queries that would exercise different combinations of these capabilities.
+Given a set of node types (agent capabilities), generate diverse natural language task queries that exercise different combinations of these capabilities.
 
 Requirements:
-- Generate realistic enterprise task descriptions
-- Cover different domains: software development, project management, HR, finance, data science, admin
-- Include simple (2-3 nodes) and complex (4+ nodes) queries
-- Include queries that require iteration (review-fix loops)
-- Include queries that require human interaction (notifications, approvals)
-- Each query should exercise at least 2 node types
+- Each query must be a realistic enterprise task description
+- Distribute queries across at least 5 distinct enterprise operational domains
+- Include queries that exercise 2-3 node types and queries that exercise 4 or more node types
+- Include queries where completing a step conditionally triggers re-execution of a prior step
+- Include queries where at least one step requires a human actor to act or authorize
+- Each query must exercise at least 2 node types
 
-Return a JSON array of objects: [{"query": "...", "expected_intents": ["..."], "complexity": "simple|compound|sequential|hierarchical"}]"""
+Return ONLY a JSON array of objects, each with string field query, string-array field expected_intents, and string field complexity with value from: simple, compound, sequential, hierarchical."""
 
 
 def llm_generate_seed_queries(
@@ -711,8 +700,7 @@ def llm_generate_seed_queries(
         {"role": "system", "content": _SEED_GEN_SYSTEM},
         {"role": "user", "content": (
             f"Generate {count} diverse seed queries exercising these node types:\n"
-            f"{types_str}\n\n"
-            f"Return ONLY the JSON array."
+            f"{types_str}"
         )},
     ]
 

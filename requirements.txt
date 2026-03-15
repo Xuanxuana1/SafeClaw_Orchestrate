@@ -1,0 +1,17 @@
+# Python 3.12 or 3.13 required  (openhands-ai does not support 3.14+)
+#
+# Setup:
+#   conda create -n tac python=3.13
+#   conda activate tac
+#   pip install -r requirements.txt
+
+# ── ontoplan_mvp core ─────────────────────────────────────────────────────────
+litellm>=1.0.0
+python-dotenv>=1.0.0
+
+# ── evaluation (OpenHands runtime) ───────────────────────────────────────────
+openhands-ai==0.42.0
+pyyaml>=6.0
+
+# ── test ─────────────────────────────────────────────────────────────────────
+pytest>=8.0.0
