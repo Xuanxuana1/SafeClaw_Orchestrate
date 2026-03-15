@@ -335,6 +335,11 @@ def _call_llm(
         task=task, node_type=node_type, fallback_config=cfg,
     )
 
+    # When using a custom base_url (OpenAI-compatible proxy), litellm needs
+    # the "openai/" prefix to route through the OpenAI provider path.
+    if cfg.base_url and not resolved_model.startswith(("openai/", "azure/", "ollama/")):
+        resolved_model = f"openai/{resolved_model}"
+
     kwargs: Dict[str, Any] = {
         "model": resolved_model,
         "messages": messages,
@@ -408,18 +413,33 @@ def _build_intent_extraction_prompt(
     query: str,
     known_intents: Sequence[str],
     node_types: Sequence[str],
+    patterns: Optional[Sequence[Any]] = None,   # PatternTemplate list
 ) -> List[Dict[str, str]]:
     catalog_str = ", ".join(sorted(known_intents))
     types_str = ", ".join(sorted(node_types))
-    user_msg = f"""Extract intent atoms from this query:
 
-"{query}"
+    # Build SOP pattern hint block
+    pattern_hint = ""
+    if patterns:
+        lines = []
+        for p in patterns:
+            intents_str = ", ".join(p.required_intents)
+            lines.append(f"  - {p.name}: [{intents_str}]")
+        pattern_hint = (
+            "\n\nKnown SOP patterns (if the query matches one of these intent combinations, "
+            "use EXACTLY these intent names to maximize template matching):\n"
+            + "\n".join(lines)
+        )
 
-Known intent catalog: [{catalog_str}]
-Known node types: [{types_str}]
-
-Return ONLY a JSON array of objects with keys: name, execution_mode_hint, target_service_hints, role_hints, input_artifacts, output_artifacts, target_actor_hint.
-Prefer intents from the known catalog. If no exact match, create a new descriptive snake_case name."""
+    user_msg = (
+        f'Extract intent atoms from this query:\n\n"{query}"\n\n'
+        f"Known intent catalog: [{catalog_str}]\n"
+        f"Known node types: [{types_str}]"
+        f"{pattern_hint}\n\n"
+        "Return ONLY a JSON array of objects with keys: name, execution_mode_hint, "
+        "target_service_hints, role_hints, input_artifacts, output_artifacts, target_actor_hint.\n"
+        "Prefer intents from the known catalog. If no exact match, create a new descriptive snake_case name."
+    )
 
     return [
         {"role": "system", "content": _INTENT_EXTRACTION_SYSTEM},
@@ -450,7 +470,10 @@ def llm_extract_intents(
         if nt.execution_mode != "SYSTEM"
     ]
 
-    messages = _build_intent_extraction_prompt(query, known_intent_names, node_type_names)
+    messages = _build_intent_extraction_prompt(
+        query, known_intent_names, node_type_names,
+        patterns=list(ontology.patterns),   # pass SOP template list
+    )
 
     try:
         raw = _call_llm(messages, config=config, temperature=0.1, task="intent_extraction")

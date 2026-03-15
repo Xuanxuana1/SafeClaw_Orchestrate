@@ -160,6 +160,7 @@ class PlanCandidate:
     workflow: WorkflowGraph
     score: float
     validation_errors: List[str]
+    intents: List[IntentAtom] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

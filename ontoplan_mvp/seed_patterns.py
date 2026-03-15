@@ -214,6 +214,88 @@ ORCHESTRATION_NODE_TYPES = {
         output_artifacts=("collected_responses",),
         keywords=("collect", "survey", "gather", "poll", "feedback"),
     ),
+
+    # --- SDE Pack additions ---
+    "BugFix-Agent": NodeType(
+        name="BugFix-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("GitLab",),
+        input_artifacts=("issue_ref", "repo_url"),
+        output_artifacts=("fix_commit", "test_result"),
+        keywords=("bug", "fix", "patch", "debug", "implement"),
+    ),
+    "Deployment-Agent": NodeType(
+        name="Deployment-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("GitLab",),
+        input_artifacts=("repo_url", "branch"),
+        output_artifacts=("deploy_status", "pipeline_url"),
+        keywords=("deploy", "pipeline", "release", "ci", "cd"),
+    ),
+
+    # --- HR Pack additions ---
+    "InterviewScheduling-Agent": NodeType(
+        name="InterviewScheduling-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("RocketChat", "OwnCloud"),
+        input_artifacts=("candidate_ranking", "interviewer_list"),
+        output_artifacts=("schedule",),
+        keywords=("interview", "schedule", "calendar", "arrange"),
+    ),
+    "SalaryAnalysis-Agent": NodeType(
+        name="SalaryAnalysis-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("OwnCloud",),
+        input_artifacts=("salary_data",),
+        output_artifacts=("salary_report",),
+        keywords=("salary", "compensation", "pay", "wage"),
+    ),
+    "AttendanceCheck-Agent": NodeType(
+        name="AttendanceCheck-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("OwnCloud", "RocketChat"),
+        input_artifacts=("date_range", "department"),
+        output_artifacts=("attendance_data",),
+        keywords=("attendance", "leave", "absence", "checkin"),
+    ),
+
+    # --- Finance Pack additions ---
+    "TaxCalculation-Agent": NodeType(
+        name="TaxCalculation-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("OwnCloud",),
+        input_artifacts=("financial_data", "tax_rules"),
+        output_artifacts=("tax_report",),
+        keywords=("tax", "calculate", "fiscal", "deduction"),
+    ),
+
+    # --- DS Pack additions ---
+    "DataCleaning-Agent": NodeType(
+        name="DataCleaning-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("OwnCloud",),
+        input_artifacts=("raw_data_files",),
+        output_artifacts=("cleaned_data",),
+        keywords=("clean", "deduplicate", "normalize", "preprocess"),
+    ),
+    "StatAnalysis-Agent": NodeType(
+        name="StatAnalysis-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=(),
+        input_artifacts=("cleaned_data", "analysis_spec"),
+        output_artifacts=("analysis_result", "charts"),
+        keywords=("stat", "statistics", "analyze", "correlation", "regression"),
+    ),
+
+    # --- Admin Pack additions ---
+    "MeetingArrange-Agent": NodeType(
+        name="MeetingArrange-Agent",
+        execution_mode="AUTOMATED",
+        access_bindings=("RocketChat", "OwnCloud"),
+        input_artifacts=("attendee_list", "time_range"),
+        output_artifacts=("meeting_schedule",),
+        keywords=("meeting", "calendar", "book", "room", "conference"),
+    ),
 }
 
 # ---------------------------------------------------------------------------

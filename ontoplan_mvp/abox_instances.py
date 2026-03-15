@@ -385,6 +385,88 @@ INTENT_CATALOG: Dict[str, IntentAtom] = {
         input_artifacts=("extracted_data",),
         output_artifacts=("validated_data",),
     ),
+
+    # === SDE additions ===
+    "bug_fix": IntentAtom(
+        name="bug_fix",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("GitLab",),
+        role_hints=("SDE",),
+        input_artifacts=("issue_ref", "repo_url"),
+        output_artifacts=("fix_commit", "test_result"),
+    ),
+    "deployment": IntentAtom(
+        name="deployment",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("GitLab",),
+        role_hints=("SDE",),
+        input_artifacts=("repo_url", "branch"),
+        output_artifacts=("deploy_status", "pipeline_url"),
+    ),
+
+    # === HR additions ===
+    "schedule_interview": IntentAtom(
+        name="schedule_interview",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("RocketChat", "OwnCloud"),
+        role_hints=("HR",),
+        input_artifacts=("candidate_ranking",),
+        output_artifacts=("schedule",),
+    ),
+    "salary_analysis": IntentAtom(
+        name="salary_analysis",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("OwnCloud",),
+        role_hints=("HR",),
+        input_artifacts=("salary_data",),
+        output_artifacts=("salary_report",),
+    ),
+    "attendance_check": IntentAtom(
+        name="attendance_check",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("OwnCloud", "RocketChat"),
+        role_hints=("HR",),
+        input_artifacts=("date_range", "department"),
+        output_artifacts=("attendance_data",),
+    ),
+
+    # === Finance additions ===
+    "tax_calculation": IntentAtom(
+        name="tax_calculation",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("OwnCloud",),
+        role_hints=("Finance",),
+        input_artifacts=("financial_data", "tax_rules"),
+        output_artifacts=("tax_report",),
+    ),
+
+    # === DS additions ===
+    "data_cleaning": IntentAtom(
+        name="data_cleaning",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("OwnCloud",),
+        role_hints=("DS",),
+        input_artifacts=("raw_data_files",),
+        output_artifacts=("cleaned_data",),
+    ),
+    "stat_analysis": IntentAtom(
+        name="stat_analysis",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=(),
+        role_hints=("DS",),
+        input_artifacts=("cleaned_data", "analysis_spec"),
+        output_artifacts=("analysis_result", "charts"),
+    ),
+
+    # === Admin additions ===
+    "meeting_arrangement": IntentAtom(
+        name="meeting_arrangement",
+        execution_mode_hint="AUTOMATED",
+        target_service_hints=("RocketChat", "OwnCloud"),
+        role_hints=("Admin",),
+        input_artifacts=("attendee_list", "time_range"),
+        output_artifacts=("meeting_schedule",),
+    ),
 }
 
 
@@ -447,6 +529,20 @@ INTENT_NODE_PREFERENCES: Dict[str, Tuple[str, ...]] = {
     "decision_recording":    ("ReportGenerate-Agent",),
     # Data quality
     "data_quality_check":    ("data_quality_loop", "Critic-Agent"),
+    # SDE additions
+    "bug_fix":              ("BugFix-Agent",),
+    "deployment":           ("Deployment-Agent",),
+    # HR additions
+    "schedule_interview":   ("InterviewScheduling-Agent",),
+    "salary_analysis":      ("SalaryAnalysis-Agent",),
+    "attendance_check":     ("AttendanceCheck-Agent",),
+    # Finance additions
+    "tax_calculation":      ("TaxCalculation-Agent",),
+    # DS additions
+    "data_cleaning":        ("DataCleaning-Agent",),
+    "stat_analysis":        ("StatAnalysis-Agent",),
+    # Admin additions
+    "meeting_arrangement":  ("MeetingArrange-Agent",),
 }
 
 
@@ -472,6 +568,9 @@ def _sys(name: str) -> WorkflowNode:
                 "project_ref", "question_list", "target_users",
                 "resume_files", "invoice_files", "payment_files",
                 "expense_files", "policy_rules", "extracted_data",
+                "date_range", "department", "raw_data_files", "attendee_list",
+                "time_range", "salary_data", "financial_data", "tax_rules",
+                "interviewer_list", "branch", "analysis_spec",
             ),
         )
     return WorkflowNode(
@@ -486,6 +585,8 @@ def _sys(name: str) -> WorkflowNode:
             "synthesized_result", "decision_record",
             "execution_result", "debated_result", "refined_result",
             "validated_data",
+            "deploy_status", "attendance_data", "tax_report", "salary_report",
+            "meeting_schedule", "fix_commit", "analysis_result", "schedule",
         ),
         output_artifacts=(),
     )
@@ -626,6 +727,26 @@ def build_seq_resume_screen_schedule() -> WorkflowGraph:
             _edge("download", "screen", ("resume_files",)),
             _edge("screen", "schedule", ("candidate_ranking",)),
             _edge("schedule", "ResultSinkNode", ("schedule_confirmation",)),
+        ],
+    )
+
+
+def build_seq_issue_check_notify() -> WorkflowGraph:
+    """Sequential: lookup issue status -> notify stakeholder."""
+    return WorkflowGraph(
+        nodes=[
+            _sys("QuerySourceNode"),
+            _node("lookup", "IssueTracking-Agent", "AUTOMATED",
+                  ("issue_ref",), ("issue_status", "issue_metadata")),
+            _node("notify", "Notify", "INTERACTIVE",
+                  ("issue_status",), ("notification_sent",),
+                  target_actor_role="Manager"),
+            _sys("ResultSinkNode"),
+        ],
+        edges=[
+            _edge("QuerySourceNode", "lookup", ("issue_ref",)),
+            _edge("lookup", "notify", ("issue_status",)),
+            _edge("notify", "ResultSinkNode", ("notification_sent",)),
         ],
     )
 
@@ -1324,6 +1445,7 @@ def _register_all() -> None:
         "seq_repo_modify_commit":    build_seq_repo_modify_commit,
         "seq_expense_validate_report": build_seq_expense_validate_report,
         "seq_resume_screen_schedule": build_seq_resume_screen_schedule,
+        "seq_issue_check_notify":    build_seq_issue_check_notify,
         # Debate
         "debate_code_review":        build_debate_code_review,
         "debate_loop_code_review":   build_debate_loop_code_review,

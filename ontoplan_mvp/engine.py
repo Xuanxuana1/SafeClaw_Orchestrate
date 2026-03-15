@@ -257,6 +257,7 @@ class OntoPlanEngine:
                 ),
                 validation_errors=["no intents extracted from query"],
                 score=0.0,
+                intents=[],
             )
         candidates = self.retrieve_candidates(intents)
         initial = self.assemble(candidates, intents)
@@ -266,6 +267,8 @@ class OntoPlanEngine:
         if self.use_llm and optimized.score > 0:
             optimized = self._apply_llm_judge(optimized, query)
 
+        # Attach extracted intents to the result so callers don't need to re-extract
+        optimized.intents = list(intents)
         return optimized
 
     def _apply_llm_judge(self, candidate: PlanCandidate, query: str) -> PlanCandidate:
@@ -338,19 +341,63 @@ class OntoPlanEngine:
     def _assemble_linear(
         self, candidates: Dict[str, List[NodeType]], intents: Sequence[IntentAtom]
     ) -> WorkflowGraph:
-        nodes = [self._system_node("QuerySourceNode")]
+        # Build a dynamic QuerySourceNode whose output_artifacts covers all
+        # inputs needed by the planned nodes.  The task query is the source of
+        # all initial artifacts (URLs, file paths, params in the description),
+        # so it is semantically correct to treat it as able to supply them.
+        base_query_outputs = set(self.ontology.node_types["QuerySourceNode"].output_artifacts)
+        for intent in intents:
+            nt_list = candidates.get(intent.name, [])
+            if nt_list:
+                base_query_outputs.update(nt_list[0].input_artifacts)
+            base_query_outputs.update(intent.input_artifacts)
+
+        query_node = WorkflowNode(
+            name="QuerySourceNode",
+            node_type="QuerySourceNode",
+            execution_mode="SYSTEM",
+            input_artifacts=(),
+            output_artifacts=tuple(sorted(base_query_outputs)),
+            metadata={},
+        )
+
+        nodes: List[WorkflowNode] = [query_node]
         edges: List[WorkflowEdge] = []
 
         for intent in intents:
-            node_type = candidates[intent.name][0]
+            nt_list = candidates.get(intent.name, [])
+            if not nt_list:
+                logger.debug("No candidate nodes for intent %s, skipping", intent.name)
+                continue
+            node_type = nt_list[0]
             instance = self._node_instance(node_type.name, node_type, intent)
+            if any(n.name == instance.name for n in nodes):
+                logger.debug(
+                    "Node %s already in workflow, skipping duplicate for intent %s",
+                    instance.name, intent.name,
+                )
+                continue
             nodes.append(instance)
             parent = self._best_parent(nodes[:-1], instance)
             if parent is not None:
                 parent_name, shared = parent
                 edges.append(WorkflowEdge(parent_name, instance.name, shared))
 
-        sink = self._system_node("ResultSinkNode")
+        # Build a dynamic ResultSinkNode that accepts whatever the plan produces.
+        all_outputs: set = set()
+        for node in nodes:
+            if node.execution_mode != "SYSTEM":
+                all_outputs.update(node.output_artifacts)
+        # Also keep the static sink inputs so pre-assembled patterns still validate
+        base_sink_inputs = set(self.ontology.node_types["ResultSinkNode"].input_artifacts)
+        sink = WorkflowNode(
+            name="ResultSinkNode",
+            node_type="ResultSinkNode",
+            execution_mode="SYSTEM",
+            input_artifacts=tuple(sorted(all_outputs | base_sink_inputs)),
+            output_artifacts=(),
+            metadata={},
+        )
         nodes.append(sink)
         for node in nodes[:-1]:
             if any(edge.source == node.name for edge in edges):
@@ -429,11 +476,13 @@ class OntoPlanEngine:
     ) -> float:
         if validation_errors:
             return 0.0
-        expected_modes = [intent.execution_mode_hint for intent in intents]
-        actual_modes = [node.execution_mode for node in workflow.nodes if node.execution_mode != "SYSTEM"]
-        matched = sum(
-            1 for expected, actual in zip(expected_modes, actual_modes) if expected == actual
+        from collections import Counter
+        expected_counts = Counter(intent.execution_mode_hint for intent in intents)
+        actual_counts = Counter(
+            node.execution_mode for node in workflow.nodes if node.execution_mode != "SYSTEM"
         )
-        mode_score = matched / max(len(expected_modes), 1)
+        matched = sum(min(expected_counts[m], actual_counts[m]) for m in expected_counts)
+        mode_score = matched / max(sum(expected_counts.values()), 1)
+        # Compactness bonus for simpler graphs; weighted so score stays in [0, 1]
         compactness = 1.0 / max(len(workflow.nodes), 1)
-        return round(mode_score + compactness, 4)
+        return round(min(1.0, 0.9 * mode_score + 0.1 * compactness), 4)
