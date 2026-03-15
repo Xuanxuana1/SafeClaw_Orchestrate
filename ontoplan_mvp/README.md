@@ -78,13 +78,17 @@ Note the `-image` suffix — e.g. `sde-add-all-repos-to-docs-image`, not `sde-ad
 # 1. Install Docker Desktop from https://www.docker.com/products/docker-desktop/
 #    and start it (whale icon in menu bar)
 
-# 2. Log in to ghcr.io (GitHub token with read:packages scope)
+# 2. Enable host networking (REQUIRED — otherwise runtime gets 502 Bad Gateway)
+#    Docker Desktop → Settings → Resources → Network → Enable host networking → Apply & restart
+#    Requires Docker Desktop 4.29+. Check version: docker version --format '{{.Server.Version}}'
+
+# 3. Log in to ghcr.io (GitHub token with read:packages scope)
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
-# 3. Pull the task image
+# 4. Pull the task image
 docker pull ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0
 
-# 4. Run evaluation (from project root)
+# 5. Run evaluation (from project root)
 conda activate TAC
 PYTHONPATH=$PWD python evaluation/run_eval_orchestrated.py \
   --task-image-name ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0 \
@@ -93,43 +97,62 @@ PYTHONPATH=$PWD python evaluation/run_eval_orchestrated.py \
   --outputs-path ./outputs/orchestrated
 ```
 
+> First run builds the OpenHands runtime image (~15 min). Subsequent runs reuse the cache and start in seconds.
+
 ### Linux Server (SSH, no UI)
 
-Docker on Linux runs as a daemon — no desktop required.
+Linux Docker Engine natively supports host networking — no extra configuration needed.
 
 ```bash
-# 1. Install Docker Engine (no Desktop needed)
+# 1. Install Docker Engine
 curl -fsSL https://get.docker.com | sudo sh
 
-# 2. Add your user to the docker group (avoid sudo for every command)
+# 2. Add your user to the docker group (skip if running as root)
 sudo usermod -aG docker $USER
-newgrp docker          # apply without re-login
+newgrp docker
 
-# 3. Verify Docker is running
+# 3. Verify Docker daemon is running
 docker info | head -5
 
-# 4. Log in to ghcr.io
+# 4. Log in to ghcr.io (GitHub token with read:packages scope)
 echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 
-# 5. Pull the task image
+# 5. Clone the repo and enter it
+git clone https://github.com/YOUR_ORG/TheAgentCompany.git
+cd TheAgentCompany
+
+# 6. Create conda environment and install dependencies
+conda create -n TAC python=3.13 -y
+conda activate TAC
+pip install -r requirements.txt
+
+# 7. Create config.toml (see config section above)
+cat > config.toml << 'EOF'
+[core]
+workspace_base = "/tmp/openhands_workspace"
+
+[llm.llm]
+model = "deepseek-ai/DeepSeek-V3.2"
+api_key = "YOUR_API_KEY"
+base_url = "http://YOUR_ENDPOINT/v1/"
+EOF
+
+# 8. Pull the task image
 docker pull ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0
 
-# 6. Install dependencies
-pip install openhands-ai==0.42.0
-
-# 7. Run evaluation in a persistent session (tmux recommended for long runs)
+# 9. Run evaluation inside tmux (SSH sessions drop; tmux keeps it alive)
 tmux new -s eval
-cd /path/to/TheAgentCompany
 PYTHONPATH=$PWD python evaluation/run_eval_orchestrated.py \
   --task-image-name ghcr.io/theagentcompany/sde-add-all-repos-to-docs-image:1.0.0 \
   --agent-llm-config llm \
   --env-llm-config llm \
   --outputs-path ./outputs/orchestrated
-# Detach: Ctrl+B then D  |  Reattach: tmux attach -t eval
+# Detach from tmux: Ctrl+B then D
+# Reattach later:   tmux attach -t eval
 ```
 
-> **Root account**: If running as root (e.g. EC2), the `docker` group step is unnecessary.
-> OpenHands also recommends root for full filesystem access inside containers.
+> **Root account**: If running as root (common on EC2/bare metal), skip the `usermod` step.
+> OpenHands recommends root for full filesystem access inside containers.
 
 ### Fallback behavior
 
